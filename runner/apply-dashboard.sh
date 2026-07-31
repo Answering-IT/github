@@ -23,7 +23,17 @@ if [[ -z "$INSTANCE" ]]; then
 fi
 
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-body="$(sed "s/INSTANCE_ID_PLACEHOLDER/${INSTANCE}/g" "$here/cloudwatch-dashboard.json")"
+# The EBS widget needs the root volume, which is looked up from the instance rather than
+# configured: one fewer thing to keep in sync, and it cannot drift.
+ROOT_VOL="${CI_HOST_ROOT_VOLUME:-$(aws ec2 describe-volumes --region "$REGION" \
+  --filters "Name=attachment.instance-id,Values=${INSTANCE}" \
+  --query 'Volumes[?Attachments[0].Device==`/dev/xvda`].VolumeId' --output text 2>/dev/null)}"
+if [[ -z "$ROOT_VOL" ]]; then
+  echo "could not resolve the root volume; set CI_HOST_ROOT_VOLUME" >&2; exit 1
+fi
+
+body="$(sed -e "s/INSTANCE_ID_PLACEHOLDER/${INSTANCE}/g" \
+            -e "s/ROOT_VOLUME_PLACEHOLDER/${ROOT_VOL}/g" "$here/cloudwatch-dashboard.json")"
 
 aws cloudwatch put-dashboard \
   --region "$REGION" \

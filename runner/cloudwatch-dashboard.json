@@ -2,14 +2,20 @@
   "widgets": [
     {
       "type": "text",
-      "x": 0, "y": 0, "width": 24, "height": 3,
+      "x": 0,
+      "y": 0,
+      "width": 24,
+      "height": 3,
       "properties": {
-        "markdown": "# CI host — Jenkins EC2 (the shared CI host)\n\nJenkins and five GitHub Actions runners share this machine. **Swap growth is the signal that matters** — the runners are denied swap by their cgroup, so anything paged out is Jenkins, and Jenkins stays slow until it pages back in. Available memory near zero and swap climbing together mean the box is oversubscribed, not that a build is heavy.\n\n`RunnersDown` above zero is silent damage: a repository whose runner is registered but not listening has its jobs queue for **24 hours** and then die, with no failure to look at.\n\nPublished every 5 minutes by `publish-metrics.sh` on the host. Metrics resolution is 5 minutes, so a short spike inside a build can be missed."
+        "markdown": "# CI host \u2014 Jenkins EC2 (the shared CI host)\n\nJenkins and five GitHub Actions runners share this machine. **Swap growth is the signal that matters** \u2014 the runners are denied swap by their cgroup, so anything paged out is Jenkins, and Jenkins stays slow until it pages back in. Available memory near zero and swap climbing together mean the box is oversubscribed, not that a build is heavy.\n\n`RunnersDown` above zero is silent damage: a repository whose runner is registered but not listening has its jobs queue for **24 hours** and then die, with no failure to look at.\n\nPublished every 5 minutes by `publish-metrics.sh` on the host. Metrics resolution is 5 minutes, so a short spike inside a build can be missed.\n\n**Load high while CPU is idle means blocked on disk, not short of cores.** That is how the root volume was found to be magnetic at ~100 IOPS with a queue of 3.3 \u2014 three concurrent `npm ci` runs waiting on it while the containers sat at 3% CPU. `VolumeQueueLength` comes free from AWS; it needs no publisher."
       }
     },
     {
       "type": "metric",
-      "x": 0, "y": 3, "width": 6, "height": 4,
+      "x": 0,
+      "y": 3,
+      "width": 6,
+      "height": 4,
       "properties": {
         "title": "Jenkins alive",
         "view": "singleValue",
@@ -17,12 +23,25 @@
         "stat": "Minimum",
         "period": 300,
         "sparkline": true,
-        "metrics": [["Answering/CIHost", "JenkinsUp", "InstanceId", "INSTANCE_ID_PLACEHOLDER", {"label": "1 = running"}]]
+        "metrics": [
+          [
+            "Answering/CIHost",
+            "JenkinsUp",
+            "InstanceId",
+            "INSTANCE_ID_PLACEHOLDER",
+            {
+              "label": "1 = running"
+            }
+          ]
+        ]
       }
     },
     {
       "type": "metric",
-      "x": 6, "y": 3, "width": 6, "height": 4,
+      "x": 6,
+      "y": 3,
+      "width": 6,
+      "height": 4,
       "properties": {
         "title": "Runners down",
         "view": "singleValue",
@@ -31,14 +50,33 @@
         "period": 300,
         "sparkline": true,
         "metrics": [
-          ["Answering/CIHost", "RunnersDown", "InstanceId", "INSTANCE_ID_PLACEHOLDER", {"label": "down"}],
-          ["Answering/CIHost", "RunnersExpected", "InstanceId", "INSTANCE_ID_PLACEHOLDER", {"label": "registered"}]
+          [
+            "Answering/CIHost",
+            "RunnersDown",
+            "InstanceId",
+            "INSTANCE_ID_PLACEHOLDER",
+            {
+              "label": "down"
+            }
+          ],
+          [
+            "Answering/CIHost",
+            "RunnersExpected",
+            "InstanceId",
+            "INSTANCE_ID_PLACEHOLDER",
+            {
+              "label": "registered"
+            }
+          ]
         ]
       }
     },
     {
       "type": "metric",
-      "x": 12, "y": 3, "width": 6, "height": 4,
+      "x": 12,
+      "y": 3,
+      "width": 6,
+      "height": 4,
       "properties": {
         "title": "Shared runner budget",
         "view": "singleValue",
@@ -46,12 +84,25 @@
         "stat": "Maximum",
         "period": 300,
         "sparkline": true,
-        "metrics": [["Answering/CIHost", "RunnerBudgetPercent", "InstanceId", "INSTANCE_ID_PLACEHOLDER", {"label": "% of 1800 MB"}]]
+        "metrics": [
+          [
+            "Answering/CIHost",
+            "RunnerBudgetPercent",
+            "InstanceId",
+            "INSTANCE_ID_PLACEHOLDER",
+            {
+              "label": "% of 1800 MB"
+            }
+          ]
+        ]
       }
     },
     {
       "type": "metric",
-      "x": 18, "y": 3, "width": 6, "height": 4,
+      "x": 18,
+      "y": 3,
+      "width": 6,
+      "height": 4,
       "properties": {
         "title": "Root disk",
         "view": "singleValue",
@@ -59,32 +110,74 @@
         "stat": "Maximum",
         "period": 300,
         "sparkline": true,
-        "metrics": [["Answering/CIHost", "DiskUsedPercent", "InstanceId", "INSTANCE_ID_PLACEHOLDER", {"label": "% used"}]]
+        "metrics": [
+          [
+            "Answering/CIHost",
+            "DiskUsedPercent",
+            "InstanceId",
+            "INSTANCE_ID_PLACEHOLDER",
+            {
+              "label": "% used"
+            }
+          ]
+        ]
       }
     },
     {
       "type": "metric",
-      "x": 0, "y": 7, "width": 12, "height": 7,
+      "x": 0,
+      "y": 7,
+      "width": 12,
+      "height": 7,
       "properties": {
-        "title": "Swap in use — the signal to watch",
+        "title": "Swap in use \u2014 the signal to watch",
         "view": "timeSeries",
         "stacked": false,
         "region": "us-east-1",
         "stat": "Maximum",
         "period": 300,
-        "yAxis": {"left": {"label": "MB", "showUnits": false, "min": 0}},
-        "metrics": [["Answering/CIHost", "SwapUsedMB", "InstanceId", "INSTANCE_ID_PLACEHOLDER", {"label": "swap used", "color": "#b3261e"}]],
+        "yAxis": {
+          "left": {
+            "label": "MB",
+            "showUnits": false,
+            "min": 0
+          }
+        },
+        "metrics": [
+          [
+            "Answering/CIHost",
+            "SwapUsedMB",
+            "InstanceId",
+            "INSTANCE_ID_PLACEHOLDER",
+            {
+              "label": "swap used",
+              "color": "#b3261e"
+            }
+          ]
+        ],
         "annotations": {
           "horizontal": [
-            {"label": "baseline before the runners were added", "value": 850, "color": "#9aa8b2"},
-            {"label": "Jenkins being evicted", "value": 1200, "color": "#a85c00", "fill": "above"}
+            {
+              "label": "baseline before the runners were added",
+              "value": 850,
+              "color": "#9aa8b2"
+            },
+            {
+              "label": "Jenkins being evicted",
+              "value": 1200,
+              "color": "#a85c00",
+              "fill": "above"
+            }
           ]
         }
       }
     },
     {
       "type": "metric",
-      "x": 12, "y": 7, "width": 12, "height": 7,
+      "x": 12,
+      "y": 7,
+      "width": 12,
+      "height": 7,
       "properties": {
         "title": "Memory available",
         "view": "timeSeries",
@@ -92,19 +185,48 @@
         "region": "us-east-1",
         "stat": "Minimum",
         "period": 300,
-        "yAxis": {"left": {"label": "MB", "showUnits": false, "min": 0}},
-        "metrics": [["Answering/CIHost", "MemoryAvailableMB", "InstanceId", "INSTANCE_ID_PLACEHOLDER", {"label": "available", "color": "#0d7d8c"}]],
+        "yAxis": {
+          "left": {
+            "label": "MB",
+            "showUnits": false,
+            "min": 0
+          }
+        },
+        "metrics": [
+          [
+            "Answering/CIHost",
+            "MemoryAvailableMB",
+            "InstanceId",
+            "INSTANCE_ID_PLACEHOLDER",
+            {
+              "label": "available",
+              "color": "#0d7d8c"
+            }
+          ]
+        ],
         "annotations": {
           "horizontal": [
-            {"label": "room for one build", "value": 1500, "color": "#9aa8b2"},
-            {"label": "oversubscribed", "value": 600, "color": "#b3261e", "fill": "below"}
+            {
+              "label": "room for one build",
+              "value": 1500,
+              "color": "#9aa8b2"
+            },
+            {
+              "label": "oversubscribed",
+              "value": 600,
+              "color": "#b3261e",
+              "fill": "below"
+            }
           ]
         }
       }
     },
     {
       "type": "metric",
-      "x": 0, "y": 14, "width": 12, "height": 7,
+      "x": 0,
+      "y": 14,
+      "width": 12,
+      "height": 7,
       "properties": {
         "title": "Runner budget used, against its 1800 MB cap",
         "view": "timeSeries",
@@ -112,19 +234,48 @@
         "region": "us-east-1",
         "stat": "Maximum",
         "period": 300,
-        "yAxis": {"left": {"label": "MB", "showUnits": false, "min": 0, "max": 2000}},
-        "metrics": [["Answering/CIHost", "RunnerBudgetUsedMB", "InstanceId", "INSTANCE_ID_PLACEHOLDER", {"label": "used by all runners", "color": "#5b7c99"}]],
+        "yAxis": {
+          "left": {
+            "label": "MB",
+            "showUnits": false,
+            "min": 0,
+            "max": 2000
+          }
+        },
+        "metrics": [
+          [
+            "Answering/CIHost",
+            "RunnerBudgetUsedMB",
+            "InstanceId",
+            "INSTANCE_ID_PLACEHOLDER",
+            {
+              "label": "used by all runners",
+              "color": "#5b7c99"
+            }
+          ]
+        ],
         "annotations": {
           "horizontal": [
-            {"label": "cap — the sum across every runner, not each one", "value": 1800, "color": "#b3261e"},
-            {"label": "five idle runners", "value": 300, "color": "#9aa8b2"}
+            {
+              "label": "cap \u2014 the sum across every runner, not each one",
+              "value": 1800,
+              "color": "#b3261e"
+            },
+            {
+              "label": "five idle runners",
+              "value": 300,
+              "color": "#9aa8b2"
+            }
           ]
         }
       }
     },
     {
       "type": "metric",
-      "x": 12, "y": 14, "width": 12, "height": 7,
+      "x": 12,
+      "y": 14,
+      "width": 12,
+      "height": 7,
       "properties": {
         "title": "Root disk used",
         "view": "timeSeries",
@@ -132,11 +283,138 @@
         "region": "us-east-1",
         "stat": "Maximum",
         "period": 300,
-        "yAxis": {"left": {"label": "%", "showUnits": false, "min": 0, "max": 100}},
-        "metrics": [["Answering/CIHost", "DiskUsedPercent", "InstanceId", "INSTANCE_ID_PLACEHOLDER", {"label": "% used", "color": "#a85c00"}]],
+        "yAxis": {
+          "left": {
+            "label": "%",
+            "showUnits": false,
+            "min": 0,
+            "max": 100
+          }
+        },
+        "metrics": [
+          [
+            "Answering/CIHost",
+            "DiskUsedPercent",
+            "InstanceId",
+            "INSTANCE_ID_PLACEHOLDER",
+            {
+              "label": "% used",
+              "color": "#a85c00"
+            }
+          ]
+        ],
         "annotations": {
           "horizontal": [
-            {"label": "each runner carries its own copy of the tarball and caches", "value": 80, "color": "#b3261e", "fill": "above"}
+            {
+              "label": "each runner carries its own copy of the tarball and caches",
+              "value": 80,
+              "color": "#b3261e",
+              "fill": "above"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "type": "metric",
+      "x": 0,
+      "y": 21,
+      "width": 12,
+      "height": 7,
+      "properties": {
+        "title": "Load per vCPU \u2014 high with idle CPU means blocked on I/O, not busy",
+        "view": "timeSeries",
+        "stacked": false,
+        "region": "us-east-1",
+        "stat": "Maximum",
+        "period": 300,
+        "yAxis": {
+          "left": {
+            "label": "\u00d7 cores",
+            "showUnits": false,
+            "min": 0
+          }
+        },
+        "metrics": [
+          [
+            "Answering/CIHost",
+            "LoadPerVCPU",
+            "InstanceId",
+            "INSTANCE_ID_PLACEHOLDER",
+            {
+              "label": "load / vCPU",
+              "color": "#a85c00"
+            }
+          ],
+          [
+            "Answering/CIHost",
+            "RunnersBusy",
+            "InstanceId",
+            "INSTANCE_ID_PLACEHOLDER",
+            {
+              "label": "runners building",
+              "color": "#0d7d8c",
+              "yAxis": "right"
+            }
+          ]
+        ],
+        "annotations": {
+          "horizontal": [
+            {
+              "label": "saturated",
+              "value": 1,
+              "color": "#a85c00"
+            },
+            {
+              "label": "queueing badly",
+              "value": 4,
+              "color": "#b3261e",
+              "fill": "above"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "type": "metric",
+      "x": 12,
+      "y": 21,
+      "width": 12,
+      "height": 7,
+      "properties": {
+        "title": "Root volume I/O queue \u2014 the metric that found the real bottleneck",
+        "view": "timeSeries",
+        "stacked": false,
+        "region": "us-east-1",
+        "stat": "Maximum",
+        "period": 300,
+        "yAxis": {
+          "left": {
+            "label": "requests waiting",
+            "showUnits": false,
+            "min": 0
+          }
+        },
+        "metrics": [
+          [
+            "AWS/EBS",
+            "VolumeQueueLength",
+            "VolumeId",
+            "ROOT_VOLUME_PLACEHOLDER",
+            {
+              "label": "queue length",
+              "color": "#b3261e"
+            }
+          ]
+        ],
+        "annotations": {
+          "horizontal": [
+            {
+              "label": "requests are waiting on the disk",
+              "value": 1,
+              "color": "#a85c00",
+              "fill": "above"
+            }
           ]
         }
       }

@@ -128,10 +128,26 @@ CI_HOST_INSTANCE_ID=i-... ./runner/apply-dashboard.sh
 
 ## Sizing, honestly
 
-Five repositories on a two-vCPU host works, and it queues rather than falling over, but three
-concurrent builds put the load average around ten times the core count. Memory is the
-resource the budget solved; CPU is the one still exposed.
+Five repositories on a two-vCPU host works and does not fall over, but three concurrent
+builds pushed the load average past ten times the core count.
 
-If more repositories are coming, the choices are fewer active runners, a larger host, or an
-organisation — which is the only one that also removes the per-repository registration and
-lets one runner serve everything.
+**Read that number together with CPU before concluding anything.** When it happened here the
+containers were sitting at 3% CPU: the host was not short of cores, it was blocked on disk.
+The root volume was `standard` — magnetic, roughly 100 IOPS — with an EBS queue length of
+3.3, while three `npm ci` runs wrote thousands of small files at once. Moving it to `gp3`
+raised that to 3000 IOPS with no downtime, and likely costs less, since `standard` bills per
+million I/O requests and `gp3` does not below its baseline.
+
+The general lesson is on the dashboard: high load with idle CPU means blocked, not busy, and
+`VolumeQueueLength` is the metric that says which. It comes free from AWS and needs no
+publisher.
+
+Serialising concurrent builds is still worth considering, and for a better reason than CPU:
+concurrent builds interleave their I/O into a random pattern, which is the worst case for any
+volume. The runner supports `ACTIONS_RUNNER_HOOK_JOB_STARTED`, so a hook that waits for a
+free slot would serialise properly — with the caveat that a leaked lock would stall all CI
+silently, so any such thing needs the marker to expire by age.
+
+If more repositories are coming, the remaining choices are fewer active runners, a larger
+host, or an organisation — the last being the only one that also removes per-repository
+registration and lets one runner serve everything.
