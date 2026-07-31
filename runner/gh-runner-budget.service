@@ -1,0 +1,25 @@
+# Creates the shared runner memory budget before Docker can place a container in it.
+#
+# Install as /etc/systemd/system/gh-runner-budget.service, with the script at
+# /usr/local/sbin/gh-runner-budget.sh.
+#
+# systemd on this host is 219, so this is a plain oneshot writing the cgroup directly.
+# MemoryMax and MemoryHigh do not exist in 219, and Docker's cgroupfs driver would not
+# place containers inside a .slice anyway.
+
+[Unit]
+Description=Shared memory budget for GitHub Actions runners
+Documentation=https://github.com/Answering-IT/metadata-service/blob/main/docs/self-hosted-runner.md
+Before=docker.service
+After=sysinit.target
+RequiresMountsFor=/sys/fs/cgroup
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/local/sbin/gh-runner-budget.sh
+# Raise the ceiling here, not in the runner units, so the budget stays one number.
+Environment=GH_RUNNER_BUDGET_MB=1800
+
+[Install]
+WantedBy=multi-user.target

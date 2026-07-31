@@ -1,0 +1,14 @@
+# Publishes CI host metrics to CloudWatch. Paired with gh-runner-metrics.timer.
+#
+# Install as /etc/systemd/system/gh-runner-metrics.service with the script at
+# /usr/local/sbin/publish-metrics.sh, then enable the timer, not this unit.
+
+[Unit]
+Description=Publish CI host metrics to CloudWatch
+After=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/publish-metrics.sh
+# Nice, because collecting numbers must never compete with the work being measured.
+Nice=15

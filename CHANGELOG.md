@@ -8,6 +8,28 @@ versioning is [semantic](https://semver.org/spec/v2.0.0.html).
 
 ---
 
+## [1.2.0] - 2026-07-31
+
+### Added
+
+- `runner/` and `scripts/`: the self-hosted runner toolchain — container image, a systemd
+  template unit taking the repository as its instance, the shared memory cgroup, a metrics
+  publisher, and scripts to register a repository, check the host, and apply the CloudWatch
+  dashboard and alarms. Documented in `docs/self-hosted-runners.md`.
+
+  Moved here from a service repository, where infrastructure shared by every service did not
+  belong. Machine-specific values are parameterised rather than committed: this repository is
+  public, and an instance identifier beside a description of what runs on it is
+  reconnaissance.
+
+  `LoadPerVCPU` and `RunnersBusy` were added to the metrics after using the status tool
+  caught load at 19.3 on 2 vCPUs while memory read as healthy. The shared memory cgroup stops
+  runners exhausting RAM; nothing stops them all wanting CPU at once, and without an
+  organisation GitHub cannot be asked to queue across repositories. Memory alone would have
+  reported the host as fine.
+
+---
+
 ## [1.1.0] - 2026-07-31
 
 ### Added
