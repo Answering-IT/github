@@ -8,6 +8,24 @@ versioning is [semantic](https://semver.org/spec/v2.0.0.html).
 
 ---
 
+## [1.1.0] - 2026-07-31
+
+### Added
+
+- `build-typescript-reusable.yml`: `node_version` input, defaulting to `24` — the version
+  the file already hardcoded, so nothing changes for existing callers.
+- `build-python-reusable.yml`: `python_version` input, defaulting to `3.11`, same reasoning.
+
+  Both exist so that moving a repository to this one stays a move. The workflows here were
+  copied from `answering-automation-infra` at `v1.0.19`, but consumers are pinned further
+  back — `project-service-app` and `inventory-service-app` at `v1.0.10`, which used Node
+  20. Repointing them without this input would bundle a Node 20 to 24 upgrade into what is
+  supposed to be a change of address, in two repositories that declare neither `engines`
+  nor `.nvmrc` to check it against. They can now pass `node_version: "20"` and upgrade the
+  runtime as its own decision.
+
+---
+
 ## [1.0.0] - 2026-07-31
 
 First release. The four build gates now live in one place.

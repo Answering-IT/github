@@ -11,6 +11,12 @@ on:
         type: string
         required: false
         default: ubuntu-latest
+      python_version:
+        description: >-
+          Python version. Defaults to 3.11, which is what this workflow has always used.
+        type: string
+        required: false
+        default: "3.11"
 
 permissions:
   contents: read
@@ -26,7 +32,7 @@ jobs:
       - name: Set up Python 3.11
         uses: actions/setup-python@v5
         with:
-          python-version: '3.11'
+          python-version: ${{ inputs.python_version }}
 
       - name: Install dev dependencies
         run: |
@@ -53,7 +59,7 @@ jobs:
       - name: Set up Python 3.11
         uses: actions/setup-python@v5
         with:
-          python-version: '3.11'
+          python-version: ${{ inputs.python_version }}
 
       - name: Install dependencies
         run: |

@@ -11,6 +11,14 @@ on:
         type: string
         required: false
         default: ubuntu-latest
+      node_version:
+        description: >-
+          Node major version. Defaults to 24, which is what this workflow has always
+          used. A consumer migrating from an older pin can pass its previous version to
+          keep the move to this repository separate from a runtime upgrade.
+        type: string
+        required: false
+        default: "24"
 
 permissions:
   contents: read
@@ -26,7 +34,7 @@ jobs:
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '24'
+          node-version: ${{ inputs.node_version }}
           cache: 'npm'
 
       - name: Install dependencies
@@ -45,7 +53,7 @@ jobs:
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '24'
+          node-version: ${{ inputs.node_version }}
           cache: 'npm'
 
       - name: Install dependencies
@@ -64,7 +72,7 @@ jobs:
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '24'
+          node-version: ${{ inputs.node_version }}
           cache: 'npm'
 
       - name: Install dependencies
