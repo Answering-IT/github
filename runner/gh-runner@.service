@@ -1,0 +1,56 @@
+# One GitHub Actions runner per repository, from a single template.
+#
+# Install as /etc/systemd/system/gh-runner@.service. The instance name is the repository:
+#
+#     systemctl enable --now gh-runner@api-registry
+#
+# A template rather than one unit per repository because, without an organisation,
+# registration is per repository and this host will hold one runner for each. Eight
+# copies of the same file is eight places to forget when a flag changes.
+#
+# Adding a repository is then: extract a runner into /home/ghrunner/runners/<repo>,
+# run config.sh against that repository, and enable this unit with the repo as instance.
+
+[Unit]
+Description=GitHub Actions runner for %i
+Documentation=https://github.com/Answering-IT/metadata-service/blob/main/docs/self-hosted-runner.md
+After=docker.service network-online.target gh-runner-budget.service
+Requires=docker.service gh-runner-budget.service
+
+[Service]
+# Nothing here constrains the container: with Docker's cgroupfs driver the work lands in
+# Docker's own cgroup, not this unit's. Measured, not assumed -- during a full build
+# `systemctl show -p MemoryCurrent` on the old unit reported 0 while the machine was
+# using 3438 MB. The limits are the docker run flags below and the shared budget cgroup.
+Restart=always
+RestartSec=10
+TimeoutStopSec=3m
+
+# --cgroup-parent puts every runner inside the shared budget, so the total across all of
+# them is capped rather than each one separately. That is the whole point: eight runners
+# are eight independent GitHub queues and can all start at the same moment.
+#
+# --memory equals the budget so a single runner may use all of it when it is alone;
+# --memory-swap matching denies swap, which is the specific harm being prevented.
+#
+# --init because run.sh does not forward SIGTERM reliably as PID 1: `docker stop` timed
+# out and the container was SIGKILLed, which leaves the runner's session open server-side
+# and makes the replacement retry for about a minute against "a session already exists".
+#
+# --network host is required for Testcontainers: containers it starts through the mounted
+# socket are siblings on the host, so their mapped ports must be reachable on localhost.
+ExecStartPre=-/usr/bin/docker rm -f gh-runner-%i
+ExecStart=/usr/bin/docker run --rm --name gh-runner-%i \
+    --init \
+    --network host \
+    --cgroup-parent /ghrunners \
+    --memory 1800m \
+    --memory-swap 1800m \
+    --cpu-shares 256 \
+    --volume /home/ghrunner/runners/%i:/home/ghrunner/actions-runner \
+    --volume /var/run/docker.sock:/var/run/docker.sock \
+    gh-actions-runner:local
+ExecStop=/usr/bin/docker stop --time 60 gh-runner-%i
+
+[Install]
+WantedBy=multi-user.target

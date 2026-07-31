@@ -1,0 +1,15 @@
+# Five minutes is the resolution that matters here: a build lasts minutes, so a coarser
+# interval would miss the peak entirely, and a finer one multiplies the metric cost for
+# detail nobody reads.
+
+[Unit]
+Description=Publish CI host metrics every five minutes
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=5min
+AccuracySec=30s
+Unit=gh-runner-metrics.service
+
+[Install]
+WantedBy=timers.target

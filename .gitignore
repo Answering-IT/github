@@ -1,3 +1,6 @@
 # Generated locally, never committed.
 *.local
 .DS_Store
+__pycache__/
+*.pyc
+runner-status.html

@@ -8,8 +8,9 @@ organisation, and a user account cannot share workflows between private reposito
 organisations have an Actions access setting for that, user accounts do not. Public is
 what lets the private service repositories call these.
 
-Nothing secret belongs here. No instance identifiers, no hostnames, no infrastructure
-topology. Tooling that needs those lives in a private repository.
+Nothing secret belongs here. No instance identifiers, no hostnames, no capacity figures.
+The runner tooling below does live here, but it reads the host from the environment rather
+than carrying it.
 
 ## Available workflows
 
@@ -104,12 +105,24 @@ Known follow-up: the three copied workflows still pin `actions/checkout@v4` and
 `actions/setup-node@v4`, the versions in `v1.0.19`. They were copied unchanged so the
 move stayed a move; bumping them is its own change.
 
+## Self-hosted runners
+
+`runner/` and `scripts/` hold everything for running these workflows on Answering hardware:
+the container image, the systemd units, the shared memory budget, the metrics publisher, and
+tools to register a repository and to check the host.
+
+See [docs/self-hosted-runners.md](docs/self-hosted-runners.md).
+
+Machine-specific values are not committed here. Everything takes the host from
+`CI_HOST_INSTANCE_ID` or a flag, with no default — a wrong default would point these commands
+at somebody else's machine, and this repository is public.
+
 ## What is deliberately not here
 
 **No Terraform workflow.** It would have no consumers: the IAC repositories are CDK in
 TypeScript. `build-go-reusable.yml` is already an example of the confusion a reusable
 with no consumers causes — it predates any Go service.
 
-**No runner tooling.** The script that reports the CI host's state needs the instance
-identifier and describes how the machine is accessed. That belongs in a private
-repository, not here.
+**No instance identifiers, addresses or capacity figures.** Not secrets exactly, but a
+machine identifier next to a description of what runs on it is reconnaissance, and leaving it
+out costs nothing.
