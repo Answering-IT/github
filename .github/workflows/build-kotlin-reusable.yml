@@ -1,0 +1,119 @@
+name: Build & Gates (Kotlin - Reusable)
+
+# One job, one Gradle invocation. The pattern this replaces split lint, build, test and
+# coverage into separate jobs, which cost nothing on GitHub-hosted runners because they
+# ran in parallel -- and cost a great deal on a single self-hosted runner, where they
+# serialise and each repeats its own checkout and dependency resolution. The version it
+# was extracted from also ran the unit test suite twice, once in `test` and again in the
+# coverage job.
+#
+# Input names use underscores, not hyphens: GitHub expressions parse `inputs.java-version`
+# as a subtraction, which would force `inputs['java-version']` at every use site.
+
+on:
+  workflow_call:
+    inputs:
+      runner:
+        description: >-
+          Runner label. Defaults to ubuntu-latest. Set to self-hosted to run on the
+          Answering runner.
+        type: string
+        required: false
+        default: ubuntu-latest
+      java_version:
+        description: JDK version for actions/setup-java.
+        type: string
+        required: false
+        default: "21"
+      distribution:
+        description: JDK distribution for actions/setup-java.
+        type: string
+        required: false
+        default: temurin
+      tasks:
+        description: >-
+          Gradle tasks to run. The default is deliberately conservative: `build` already
+          depends on `check`, which pulls in test plus whichever of spotless and detekt
+          the project wires into it. Add repo-specific tasks such as `integrationTest`
+          or `jacocoTestReport` here rather than assuming every project has them.
+        type: string
+        required: false
+        default: clean build
+      gradle_args:
+        description: >-
+          Flags appended to the Gradle call. --no-daemon matters on a shared runner: the
+          daemon would otherwise hold its heap between runs.
+        type: string
+        required: false
+        default: --no-daemon --stacktrace --warning-mode=none
+      jvm_args:
+        description: >-
+          Optional override for org.gradle.jvmargs, for hosts where the value in
+          gradle.properties does not fit. Empty leaves the project's own setting alone.
+          Example: -Xmx1024m -XX:MaxMetaspaceSize=384m
+        type: string
+        required: false
+        default: ""
+      gradle_cache:
+        description: >-
+          Cache ~/.gradle through actions/cache. Worth it on an ephemeral runner, waste
+          on a persistent one where the directory already survives between runs -- and it
+          bills against Actions storage either way. Pass false when using self-hosted.
+        type: boolean
+        required: false
+        default: true
+      report_paths:
+        description: Paths uploaded as an artifact when the build fails.
+        type: string
+        required: false
+        default: |
+          build/reports/
+
+permissions:
+  contents: read
+
+jobs:
+  gradle:
+    name: Lint, Build and Test
+    runs-on: ${{ inputs.runner }}
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+
+      - name: Set up JDK ${{ inputs.java_version }}
+        uses: actions/setup-java@v5
+        with:
+          java-version: ${{ inputs.java_version }}
+          distribution: ${{ inputs.distribution }}
+          cache: ${{ inputs.gradle_cache && 'gradle' || '' }}
+
+      - name: Grant execute permission for gradlew
+        run: chmod +x gradlew
+
+      - name: Lint, build and test
+        env:
+          TASKS: ${{ inputs.tasks }}
+          GRADLE_ARGS: ${{ inputs.gradle_args }}
+          JVM_ARGS: ${{ inputs.jvm_args }}
+        run: |
+          set -euo pipefail
+          args=()
+          if [[ -n "$JVM_ARGS" ]]; then
+            args+=("-Dorg.gradle.jvmargs=$JVM_ARGS")
+          fi
+          # Word splitting on TASKS and GRADLE_ARGS is intended: both are lists of tokens.
+          # shellcheck disable=SC2086
+          ./gradlew $TASKS $GRADLE_ARGS "${args[@]+"${args[@]}"}"
+
+      # Only on failure. A green run's reports are never opened, and every upload bills
+      # against Actions storage.
+      - name: Upload reports
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: gradle-reports
+          path: ${{ inputs.report_paths }}
+          retention-days: 7
+          if-no-files-found: ignore

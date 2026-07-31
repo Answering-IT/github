@@ -1,0 +1,116 @@
+name: Build & Gates (Python - Reusable)
+
+on:
+  workflow_call:
+    inputs:
+      runner:
+        description: >-
+          Runner label for both jobs. Defaults to ubuntu-latest, so existing
+          callers are unaffected. Set it to self-hosted to run the gates on an
+          Answering self-hosted runner.
+        type: string
+        required: false
+        default: ubuntu-latest
+
+permissions:
+  contents: read
+
+jobs:
+  lint:
+    name: Lint & Format
+    runs-on: ${{ inputs.runner }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dev dependencies
+        run: |
+          python -m pip install --upgrade pip
+          if [ -f requirements-dev.txt ]; then
+            pip install -r requirements-dev.txt
+          else
+            pip install ruff black
+          fi
+
+      - name: Run ruff
+        run: ruff check .
+
+      - name: Run black
+        run: black --check .
+
+  unit-tests:
+    name: Unit Tests
+    runs-on: ${{ inputs.runner }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          # Install dev deps if they exist
+          if [ -f requirements-dev.txt ]; then
+            pip install -r requirements-dev.txt
+          fi
+          # Install test requirements FIRST (for moto, pytest plugins, etc.)
+          # This avoids conflicts with runtime boto3/botocore versions
+          if [ -f tests/requirements.txt ]; then
+            pip install -r tests/requirements.txt
+          elif [ -d tests/unit ]; then
+            # Fallback: install moto if tests/unit exists but no requirements.txt
+            pip install 'moto[dynamodb]' boto3
+          fi
+          # Install runtime deps - check common patterns:
+          #   - Top-level requirements.txt (single-app projects)
+          #   - agents/requirements.txt (kb-rag-agent pattern)
+          #   - infrastructure/lambdas/*/requirements.txt (CDK Lambda projects)
+          if [ -f requirements.txt ]; then
+            pip install -r requirements.txt
+          fi
+          if [ -f agents/requirements.txt ]; then
+            pip install -r agents/requirements.txt
+          fi
+          # Find and install any Lambda function requirements (CDK projects)
+          for req in $(find infrastructure/lambdas -name "requirements.txt" 2>/dev/null); do
+            echo "Installing Lambda deps: $req"
+            pip install -r "$req"
+          done
+
+      - name: Run pytest
+        run: |
+          # Run tests based on project structure:
+          # 1. If tests/unit/ exists, run those tests
+          # 2. Otherwise, run tests marked with 'unit' or 'smoke'
+          # pytest exit codes:
+          #   0 = all tests passed
+          #   1 = some tests failed
+          #   2 = collection error (e.g. import error in a test file)
+          #   5 = no tests collected (no markers matched)
+          # Treat exit code 5 as success — projects can adopt markers
+          # gradually without being blocked by the gate.
+          set +e
+          if [ -d tests/unit ]; then
+            echo "Running tests from tests/unit/ directory"
+            pytest tests/unit/ -v --tb=short
+            rc=$?
+          else
+            echo "Running tests marked 'unit' or 'smoke'"
+            pytest -m "unit or smoke" --tb=short
+            rc=$?
+          fi
+          set -e
+          if [ "$rc" = "5" ]; then
+            echo "::notice::No unit tests found — skipping. Add tests to tests/unit/ or use @pytest.mark.unit/@pytest.mark.smoke markers."
+            exit 0
+          fi
+          exit $rc

@@ -1,0 +1,3 @@
+# Generated locally, never committed.
+*.local
+.DS_Store
