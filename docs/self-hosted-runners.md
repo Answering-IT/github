@@ -77,7 +77,21 @@ Removing is the inverse: `runner-add.py --repo <repo> --remove`. It drops the lo
 credentials without contacting GitHub, so an offline entry is left on the repository's
 runners page to delete by hand.
 
+Why any of this looks the way it does, including the parts that reverse an obvious first
+instinct, is in [ci-host-decisions.md](ci-host-decisions.md).
+
 ## Host setup
+
+**Check the root volume before anything else.** Docker's data directory lives there and CI is
+dominated by writing many small files, so storage decides how this feels. A `standard`
+(magnetic) volume gives roughly 100 IOPS, which three concurrent `npm ci` runs will saturate
+while the CPU sits idle. `gp3` starts at 3000 IOPS, changes online with nothing restarted, and
+often costs less because `standard` bills per million I/O requests.
+
+```shell
+aws ec2 describe-volumes --volume-ids <root-vol> --query 'Volumes[0].VolumeType'
+aws ec2 modify-volume --volume-id <root-vol> --volume-type gp3
+```
 
 The pieces in `runner/`, installed once per host:
 
