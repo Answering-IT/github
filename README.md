@@ -111,7 +111,8 @@ move stayed a move; bumping them is its own change.
 the container image, the systemd units, the shared memory budget, the metrics publisher, and
 tools to register a repository and to check the host.
 
-See [docs/self-hosted-runners.md](docs/self-hosted-runners.md).
+How to run and extend it: [docs/self-hosted-runners.md](docs/self-hosted-runners.md), including [how to read the dashboard](docs/self-hosted-runners.md#reading-the-dashboard).
+Why it is built this way, with the measurements: [docs/ci-host-decisions.md](docs/ci-host-decisions.md).
 
 Machine-specific values are not committed here. Everything takes the host from
 `CI_HOST_INSTANCE_ID` or a flag, with no default — a wrong default would point these commands
