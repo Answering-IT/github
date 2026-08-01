@@ -140,6 +140,89 @@ CI_HOST_INSTANCE_ID=i-... ALARM_TOPIC_ARN=arn:aws:sns:... ./runner/apply-alarms.
 CI_HOST_INSTANCE_ID=i-... ./runner/apply-dashboard.sh
 ```
 
+## Reading the dashboard
+
+**[ci-host-jenkins-ec2](https://us-east-1.console.aws.amazon.com/cloudwatch/home?region=us-east-1#dashboards/dashboard/ci-host-jenkins-ec2)**
+— everything below is on that one page, `us-east-1`.
+
+### The four tiles across the top
+
+| Tile | Healthy | What a bad value means |
+|---|---|---|
+| **Jenkins alive** | `1` | `0` means Jenkins is gone *or* the host stopped publishing. Check both before assuming which — a dead host reads the same as a dead Jenkins |
+| **Runners down** | `0`, against the registered count beside it | Any non-zero is the quietest failure here. That repository's jobs will not fail; they queue for 24 hours and then die with no error to read |
+| **Shared runner budget** | under ~80% | The percentage of the memory cap used by *all* runners together. Sustained near 100% means builds are close to being killed. Confirm with `memory.failcnt` on the host, which counts times the limit was actually hit |
+| **Root disk** | under 80% | Each runner keeps its own copy of the release archive plus caches, so this grows with every repository added |
+
+### Swap in use
+
+The single most useful line, and the easiest to misread.
+
+The runners are denied swap by their cgroup, so **anything swapped belongs to something
+else** — in practice Jenkins. Growth means Jenkins pages are being pushed to disk, and
+Jenkins stays slow until they are read back.
+
+**But a high level is not the same as active swapping.** This metric is a *level*: it shows
+what is currently on disk, including pages evicted hours ago that nothing has needed since.
+A machine that thrashed this morning and recovered still reads high. Before reacting, check
+the rate on the host:
+
+```shell
+grep -E 'pswpin|pswpout' /proc/vmstat; sleep 10; grep -E 'pswpin|pswpout' /proc/vmstat
+```
+
+`pswpout` unchanged means nothing is being paged out now, whatever the level says. This
+exact confusion already happened once — see the false alarm in
+[ci-host-decisions.md](ci-host-decisions.md).
+
+The `SwapUsedMB` alarm inherits the same weakness: it fires on level, so historical swap that
+is quietly draining can still trigger it.
+
+### Memory available
+
+Straightforward, and the counterweight to the budget tile. The annotations mark roughly
+enough room for one build, and the point below which the host is oversubscribed. Falling
+towards the lower line *while swap climbs* is the combination that hurts Jenkins.
+
+### Runner budget used, against its cap
+
+The sum across every runner container, not any single one. That distinction is the whole
+design: without a GitHub organisation each repository needs its own runner, GitHub does not
+coordinate them, and *n* runners can each start a job at the same instant. A per-container
+limit would permit *n* times itself.
+
+The lower annotation is roughly what the runners cost when all idle, so the gap between that
+line and the current value is what builds are actually using.
+
+### Load per vCPU, with runners building
+
+**Never read this one alone.** Load counts processes waiting on disk as well as processes
+using CPU, so a high value answers "how many things are stuck" rather than "how busy is the
+processor".
+
+| Load per vCPU | Container CPU | Reading |
+|---|---|---|
+| high | high | genuinely short of cores — a bigger instance would help |
+| **high** | **low** | **blocked on I/O.** More cores would change nothing. Look at the queue graph beside it |
+| low | any | fine |
+
+The second row is not hypothetical: it is how the magnetic root volume was found, after the
+first instinct had been to buy a larger instance that would not have helped.
+
+`RunnersBusy` on the right axis says how much of the concurrency is in use, which is what
+turns "load is high" into "load is high *because three builds are running*".
+
+### Root volume I/O queue
+
+How many requests are waiting on the disk. Comes free from AWS — no publisher, no agent.
+
+Under 1 is healthy. Sustained above 1 means requests are backing up. Paired with the load
+graph it is decisive: high load, idle CPU and a queue above 1 is storage, every time.
+
+This is the metric that identified the real bottleneck, and it had been available the entire
+time — it simply was not on any dashboard. If a host feels slow and nothing else explains it,
+start here.
+
 ## Sizing, honestly
 
 Five repositories on a two-vCPU host works and does not fall over, but three concurrent

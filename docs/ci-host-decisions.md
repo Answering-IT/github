@@ -8,6 +8,10 @@ existence.
 The host is a small shared machine that also runs Jenkins. **Jenkins must keep working**
 is the constraint everything else bends around.
 
+Live view: **[ci-host-jenkins-ec2](https://us-east-1.console.aws.amazon.com/cloudwatch/home?region=us-east-1#dashboards/dashboard/ci-host-jenkins-ec2)**.
+How to read each graph, including the two that are misleading on their own, is in
+[self-hosted-runners.md](self-hosted-runners.md#reading-the-dashboard).
+
 ---
 
 ## The runner runs in a container, not on the host
