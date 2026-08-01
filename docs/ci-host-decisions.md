@@ -129,11 +129,59 @@ load      22.58  ->  16.50 and falling
 ```
 
 It plausibly costs *less*, because `standard` bills per million I/O requests and `gp3` does
-not below its baseline.
+not below its baseline. For a 30 GB volume at list price: `standard` is $1.50/month of storage
+plus $0.05 per million requests, which at ~50 sustained IOPS is roughly another $6.50;
+`gp3` is $2.40/month flat. Worth checking against a real bill rather than taking the
+arithmetic on trust.
 
 `VolumeQueueLength` comes free from AWS and needs no publisher. It was available the entire
 time and simply was not on the dashboard — which is why `LoadPerVCPU` is now charted directly
 beside it. Either number alone is misleading; the pair is diagnostic.
+
+### Afterwards: the bottleneck moved rather than disappeared
+
+Measured once the volume modification finished optimising:
+
+```
+reads/s   57  ->  2384        await 11.81ms -> 6.46ms
+rkB/s               128198    = 125 MB/s, util 100%
+```
+
+That is gp3's **baseline throughput** ceiling, not its IOPS ceiling — 2384 of 3000 available
+requests, but every megabyte of the 125 it is allowed. Raising IOPS would achieve nothing.
+The two real options are raising throughput (250 MB/s costs about $5/month more) or running
+fewer builds at once, and serialising is the better trade: one build is unlikely to want
+125 MB/s, and it reuses page cache between stages instead of three builds evicting each
+other's.
+
+### A false alarm, recorded so nobody re-raises it
+
+Swap read 1503 MB before the change and 2143 MB after, which looks like the change made
+things worse. It did not. That sample was taken **while the volume was still optimising** —
+AWS's background migration generates its own I/O — and the reading was a transient measured
+at the worst possible moment.
+
+Checked properly afterwards:
+
+```
+swap-out over 10s:     0 KB     <- nothing is being paged out
+swap-in  over 10s:    60 KB
+SwapTotal - SwapFree:  978 MB   <- down from 2143 MB
+```
+
+**Swap-out at zero is the number that settles it.** What remains is historical: pages
+evicted back when the disk really was the problem, now being faulted back in and released as
+the faster volume lets them. Most of it belongs to Jenkins and its agents (~570 MB across
+four JVMs; one agent held 150 MB of swap against 1 MB resident, having done nothing for
+months). `vm.swappiness` is at its default 60, so the kernel preferring to evict idle
+anonymous pages over dropping page cache is ordinary behaviour, not a symptom.
+
+The runner budget cgroup reported `failcnt=0` throughout: the 1800 MB limit has never once
+been reached, so no build has been throttled or killed by it.
+
+The lesson is about method rather than storage: a single sample taken during a migration is
+not a trend, and *rate* metrics (`pswpin`/`pswpout`) answer "is this happening now" in a way
+that a *level* metric like `SwapUsedMB` cannot.
 
 ---
 
