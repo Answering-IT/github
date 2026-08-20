@@ -1,0 +1,133 @@
+name: Deploy (AWS CDK - Reusable)
+
+# One CDK deploy, driven by inputs. Callers pin a tag and pass their role, stage
+# and region; the steps here are the same ones every consumer would otherwise
+# hand-write, which is the point — a merge-to-main deploy and a labelled-PR
+# deploy in the same repository cannot drift apart if both call this.
+#
+# Assumes a TypeScript CDK app built with npm, which is what every Answering CDK
+# repository is. A Python or Go one needs its own workflow, not more inputs here.
+#
+# Deliberately NOT here: `concurrency`. The caller owns it. A group declared
+# both in the caller and in this workflow deadlocks — the caller's run holds the
+# group while the job it called queues for the same group, forever.
+
+on:
+  workflow_call:
+    inputs:
+      role_to_assume:
+        description: >-
+          IAM role ARN to assume via OIDC. Required, and with no default on
+          purpose: this repository is public, and an account id committed here
+          beside a description of what it deploys is reconnaissance.
+        type: string
+        required: true
+      stage:
+        description: 'Passed as --context stage=<value>, and used in the job name.'
+        type: string
+        required: false
+        default: dev
+      region:
+        description: 'AWS region. Passed as --context region=<value> and to the credentials action.'
+        type: string
+        required: false
+        default: us-east-1
+      environment:
+        description: >-
+          GitHub environment to record the deployment against. Referencing one
+          that does not exist creates it, so the default is safe for a consumer
+          that has not configured environments.
+        type: string
+        required: false
+        default: dev
+      runner:
+        description: 'Runner label. Defaults to ubuntu-latest, so a consumer opts in to self-hosted.'
+        type: string
+        required: false
+        default: ubuntu-latest
+      node_version:
+        description: 'Node major version used to build and run the CDK app.'
+        type: string
+        required: false
+        default: "20"
+      working_directory:
+        description: 'Directory holding the CDK app (cdk.json, package.json).'
+        type: string
+        required: false
+        default: infrastructure
+      docker_assets:
+        description: >-
+          Set true when the CDK app builds container image assets — it adds QEMU
+          and Buildx for linux/amd64 and linux/arm64. Left false, a deploy with
+          no image assets skips two steps it never needed.
+        type: boolean
+        required: false
+        default: false
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  deploy:
+    name: Deploy to ${{ inputs.stage }} (${{ inputs.region }})
+    runs-on: ${{ inputs.runner }}
+    environment: ${{ inputs.environment }}
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      - name: Set up QEMU
+        if: inputs.docker_assets
+        uses: docker/setup-qemu-action@v4
+        with:
+          platforms: linux/amd64,linux/arm64
+
+      - name: Set up Docker Buildx
+        if: inputs.docker_assets
+        uses: docker/setup-buildx-action@v3
+        with:
+          platforms: linux/amd64,linux/arm64
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: ${{ inputs.node_version }}
+          cache: 'npm'
+          cache-dependency-path: ${{ inputs.working_directory }}/package-lock.json
+
+      - name: Install CDK dependencies
+        working-directory: ${{ inputs.working_directory }}
+        run: npm ci
+
+      - name: Build CDK app
+        working-directory: ${{ inputs.working_directory }}
+        run: npm run build
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v6
+        with:
+          role-to-assume: ${{ inputs.role_to_assume }}
+          aws-region: ${{ inputs.region }}
+
+      - name: CDK Deploy
+        working-directory: ${{ inputs.working_directory }}
+        run: |
+          npx cdk deploy --all --require-approval never \
+            --context stage=${{ inputs.stage }} \
+            --context region=${{ inputs.region }}
+
+      - name: Deployment Summary
+        env:
+          ROLE_ARN: ${{ inputs.role_to_assume }}
+        run: |
+          {
+            echo "### Deployment Successful"
+            echo ""
+            echo "- **Stage**: ${{ inputs.stage }}"
+            echo "- **Region**: ${{ inputs.region }}"
+            echo "- **Account**: $(printf '%s' "$ROLE_ARN" | cut -d: -f5)"
+            echo "- **Commit**: ${{ github.sha }}"
+          } >> "$GITHUB_STEP_SUMMARY"
