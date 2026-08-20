@@ -8,6 +8,30 @@ versioning is [semantic](https://semver.org/spec/v2.0.0.html).
 
 ---
 
+## [1.3.0] - 2026-08-20
+
+### Added
+
+- `deploy-cdk-reusable.yml`: one `cdk deploy` against one stage, over OIDC. Moved out of
+  a service repository that had a `Deploy.yml` doing exactly this, called both by
+  merge-to-main and by a label-gated pull request job — two entry points that only stay
+  identical while the steps live in one file. Every other CDK repository was going to
+  hand-write the same twelve steps.
+
+  `role_to_assume` is required and has no default. An account id and role name committed
+  to a public repository, beside the description of what they deploy, is reconnaissance —
+  the same reason the runner tooling here takes its host from the environment.
+
+  No `concurrency` block, deliberately. Serialising deploys per stack is necessary, but a
+  group declared both in the caller and in the called workflow deadlocks: the caller holds
+  it while the job it called queues for it. Documented in the README so the group lands in
+  the caller instead.
+
+  Post-deploy checks are not an input. They know something about the service being
+  deployed, so they belong in a `needs: deploy` job in the consumer.
+
+---
+
 ## [1.2.0] - 2026-07-31
 
 ### Added

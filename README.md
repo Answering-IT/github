@@ -20,6 +20,7 @@ than carrying it.
 | `build-typescript-reusable.yml` | `lint`, `build`, `test` | TypeScript services and front-ends |
 | `build-python-reusable.yml` | `lint`, `unit-tests` | Python services and Lambdas |
 | `build-go-reusable.yml` | `lint`, `build`, `test` | Go services |
+| `deploy-cdk-reusable.yml` | `deploy` | AWS CDK apps — one stage per call, OIDC, no long-lived keys |
 
 Every one accepts a `runner` input, defaulting to `ubuntu-latest`.
 
@@ -33,6 +34,82 @@ jobs:
 
 Pin a tag, never `@main`. A tag is what makes a change here a decision each consumer
 opts into rather than something that lands unannounced.
+
+## Deploying an AWS CDK app
+
+`deploy-cdk-reusable.yml` is one `cdk deploy` against one stage. It takes the role to
+assume — required, with no default, because this repository is public — plus stage,
+region and the usual knobs:
+
+```yaml
+jobs:
+  deploy:
+    uses: Answering-IT/github/.github/workflows/deploy-cdk-reusable.yml@v1.3.0
+    with:
+      role_to_assume: arn:aws:iam::<account>:role/<role>
+      stage: dev
+      region: us-east-1
+      runner: ${{ vars.RUNNER_LABEL || 'ubuntu-latest' }}
+      docker_assets: true          # only if the app builds container image assets
+      working_directory: infrastructure
+```
+
+The caller needs `permissions: id-token: write` — a called workflow can lower the
+token's permissions but never raise them, so declaring it here would not help.
+
+**Post-deploy checks belong to the consumer.** A reachability probe, a smoke test, a
+cache purge — those know something about the service, so they go in a `needs: deploy`
+job in the calling repository, not behind another input here.
+
+### Deploying a pull request branch
+
+The pattern worth copying is a label gate, so shipping a branch to dev is one click and
+not a second workflow that can drift from the real one:
+
+```yaml
+# .github/workflows/Build.yml
+on:
+  pull_request:
+    # `labeled` on top of the defaults, so adding the label re-runs Build and
+    # picks up the deploy job without needing a new push.
+    types: [opened, synchronize, reopened, labeled]
+
+jobs:
+  deploy-dev:
+    needs: cdk-build              # gates stay in front of the deploy
+    # Fork PRs get read-only tokens, so OIDC cannot work there.
+    if: |
+      contains(github.event.pull_request.labels.*.name, 'deploy-to-dev') &&
+      github.event.pull_request.head.repo.full_name == github.repository
+    uses: ./.github/workflows/Deploy.yml
+    with:
+      stage: dev
+```
+
+Two things this surprises people with:
+
+**The deploy does not appear as its own run.** A called workflow is a nested job of the
+caller, so a labelled PR deploy shows up inside the *Build* run as
+`Deploy PR to Dev / …` and never in the Actions list under "Deploy". Filtering by
+workflow name finds nothing and the deploy looks like it never fired.
+
+**Nesting is capped at four levels.** `Build.yml` → the repository's `Deploy.yml` →
+`deploy-cdk-reusable.yml` is three, which leaves one. A consumer with a deeper chain
+should call this one directly from `Build.yml`.
+
+### Concurrency is the caller's
+
+`deploy-cdk-reusable.yml` declares no `concurrency`, on purpose. Two runs against one
+CloudFormation stack do need serialising — the second fails with
+`UPDATE_IN_PROGRESS` — but the group has to be declared in exactly one place. Declared
+both in the caller and here, the caller's run holds the group while the job it called
+queues for that same group, and neither ever finishes. Put it in the caller:
+
+```yaml
+concurrency:
+  group: deploy-${{ inputs.stage || 'dev' }}
+  cancel-in-progress: false      # queue, so every merge ships
+```
 
 ## Running on the self-hosted runner
 
