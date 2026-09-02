@@ -63,6 +63,15 @@ on:
         type: boolean
         required: false
         default: false
+    secrets:
+      DISCORD_RELEASE_WEBHOOK_URL:
+        description: >-
+          Discord webhook for the deploy notification. Optional: without it the
+          notify step no-ops, so consumers can bump to this tag before the
+          secret exists in their repository. Reaching it needs `secrets: inherit`
+          on the call — a called workflow cannot read the caller's secrets
+          otherwise, which is the one line every consumer has to add.
+        required: false
 
 permissions:
   id-token: write
@@ -131,3 +140,13 @@ jobs:
             echo "- **Account**: $(printf '%s' "$ROLE_ARN" | cut -d: -f5)"
             echo "- **Commit**: ${{ github.sha }}"
           } >> "$GITHUB_STEP_SUMMARY"
+
+      # Last, and `always()`: a failed deploy is the one worth having in the
+      # channel. The action itself never fails the job.
+      - name: Notify Discord
+        if: always()
+        uses: Answering-IT/github/notify-discord-deploy@v1.4.0
+        with:
+          webhook_url: ${{ secrets.DISCORD_RELEASE_WEBHOOK_URL }}
+          stage: ${{ inputs.stage }}
+          region: ${{ inputs.region }}

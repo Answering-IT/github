@@ -8,6 +8,41 @@ versioning is [semantic](https://semver.org/spec/v2.0.0.html).
 
 ---
 
+## [1.4.0] - 2026-09-02
+
+### Added
+
+- `notify-discord-deploy`: a composite action posting one embed per deploy to
+  `DISCORD_RELEASE_WEBHOOK_URL` — stage, region, ref, author, and the commit subjects that
+  shipped, with links to the compare range and the run. `deploy-cdk-reusable.yml` calls it
+  as its last step, so every CDK consumer gets it by bumping the tag.
+
+  An action rather than a second reusable workflow, because the two places a deploy happens
+  are not the same shape. Several services release by hand — SAM, an ECS task, a script —
+  and never call `deploy-cdk-reusable.yml`; a reusable workflow could only have served the
+  ones that do, leaving the rest to copy the curl.
+
+  Posted on failure too, in red. A channel that only reports successes is one nobody reads
+  as authoritative, and it never fails the job it runs in: a notification that can break a
+  deploy is worse than no notification.
+
+  The commit list is read from `$GITHUB_EVENT_PATH` with `jq`, not interpolated through
+  `toJSON(github.event)`. A commit message containing a quote or a literal `${{` breaks the
+  expression, and one containing a backtick would otherwise reach a shell.
+  `scripts/test-notify-discord.sh` covers the four event shapes a deploy arrives in.
+
+### Changed
+
+- `deploy-cdk-reusable.yml`: takes an optional `DISCORD_RELEASE_WEBHOOK_URL` secret. Absent,
+  the notify step logs that it skipped and the deploy carries on, so this tag is safe to
+  adopt before the secret exists in a repository.
+
+  Consumers wanting the notification add `secrets: inherit` to the call. That line cannot be
+  avoided from here — a called workflow cannot read the caller's secrets unless they are
+  passed — and it is the only change a CDK consumer needs.
+
+---
+
 ## [1.3.0] - 2026-08-20
 
 ### Added
