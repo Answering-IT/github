@@ -10,6 +10,22 @@ versioning is [semantic](https://semver.org/spec/v2.0.0.html).
 
 ## [1.4.0] - 2026-09-02
 
+> **The `v1.4.0` tag was moved**, minutes after it was first pushed. The original
+> commit's `action.yml` used a `secrets.*` expression inside an input
+> *description*, as an example of what to pass. GitHub evaluates expressions
+> everywhere in an action manifest and a composite action has no `secrets`
+> context, so the manifest failed to load and four consumers' deploys died in
+> "Set up job".
+>
+> Moved rather than released as `v1.4.1` because nothing could have depended on
+> the original: every run that reached it failed before executing a step.
+> A new number would have meant re-opening a pull request in seven repositories
+> to move a pin that never worked.
+>
+> `scripts/test-notify-discord.sh` now rejects any expression in the manifest
+> using a context a composite action does not have. The file is valid YAML, so
+> nothing but a runner could see it.
+
 ### Added
 
 - `notify-discord-deploy`: a composite action posting one embed per deploy to
