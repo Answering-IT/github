@@ -24,6 +24,12 @@ than carrying it.
 
 Every one accepts a `runner` input, defaulting to `ubuntu-latest`.
 
+There is also one composite action:
+
+| Action | For |
+|---|---|
+| `notify-discord-deploy` | One Discord embed per deploy — stage, region, ref, and the commits that shipped |
+
 ## Calling one
 
 ```yaml
@@ -44,7 +50,7 @@ region and the usual knobs:
 ```yaml
 jobs:
   deploy:
-    uses: Answering-IT/github/.github/workflows/deploy-cdk-reusable.yml@v1.3.0
+    uses: Answering-IT/github/.github/workflows/deploy-cdk-reusable.yml@v1.4.0
     with:
       role_to_assume: arn:aws:iam::<account>:role/<role>
       stage: dev
@@ -52,6 +58,7 @@ jobs:
       runner: ${{ vars.RUNNER_LABEL || 'ubuntu-latest' }}
       docker_assets: true          # only if the app builds container image assets
       working_directory: infrastructure
+    secrets: inherit               # for the Discord notification, see below
 ```
 
 The caller needs `permissions: id-token: write` — a called workflow can lower the
@@ -110,6 +117,63 @@ concurrency:
   group: deploy-${{ inputs.stage || 'dev' }}
   cancel-in-progress: false      # queue, so every merge ships
 ```
+
+## Telling Discord what was deployed
+
+`deploy-cdk-reusable.yml` posts one embed per deploy to the webhook in
+`DISCORD_RELEASE_WEBHOOK_URL` — stage, region, ref, who pushed, and the commit subjects
+that went out, with links to the compare range and the run. A failed deploy is posted
+too, in red; a channel that only reports successes is one you stop trusting.
+
+Two things are needed in the consumer, and neither can be avoided from here:
+
+**`secrets: inherit` on the call.** A called workflow cannot read the caller's secrets
+unless they are passed, so without this line the step no-ops and nothing appears. This is
+the reason a repository has to be touched at all.
+
+**The secret in the repository.** `Answering-IT` is a user account, not an organisation,
+so there are no shared Actions secrets — every repository holds its own copy:
+
+```bash
+gh secret set DISCORD_RELEASE_WEBHOOK_URL -R Answering-IT/<repo> --body "$WEBHOOK"
+```
+
+Absent, the step logs that it skipped and the deploy carries on. That is what lets the
+workflow change land before the secret is everywhere.
+
+### A deploy that is not a CDK deploy
+
+Several services release by hand — SAM, an ECS task, a script — and those never call
+`deploy-cdk-reusable.yml`. They use the same composite action directly, which is why the
+notification is an action and not a second reusable workflow:
+
+```yaml
+      - name: Notify Discord
+        if: always()             # the failed deploy is the one worth a message
+        uses: Answering-IT/github/notify-discord-deploy@v1.4.0
+        with:
+          webhook_url: ${{ secrets.DISCORD_RELEASE_WEBHOOK_URL }}
+          stage: prod
+          region: us-east-2
+          details: '**Versión** v1.4.0'   # optional, appended to the embed
+```
+
+Inside the consumer's own workflow the secret is read directly, so no `secrets: inherit`
+is involved. The status comes from `job.status`, which is why the step wants `always()`
+and belongs last in the job.
+
+The step never fails the job. A notification that can break a deploy is worse than no
+notification, so a webhook that 404s becomes a warning annotation and nothing more.
+
+**The commit list comes from the event payload**, read from `$GITHUB_EVENT_PATH` rather
+than interpolated through `toJSON(github.event)` — a commit message with a quote or a
+literal `${{` in it breaks the expression, and one with a backtick would otherwise reach
+a shell. `scripts/test-notify-discord.sh` runs the step against the four event shapes a
+deploy arrives in (merge to main, tag, labelled pull request, and a merge too big for one
+embed) with those characters in the messages.
+
+**AutoMaintain is deliberately not wired.** It opens dependency pull requests; it deploys
+nothing, so it has nothing to announce.
 
 ## Running on the self-hosted runner
 

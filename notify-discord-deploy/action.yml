@@ -1,0 +1,154 @@
+name: Notify Discord (deploy)
+description: >-
+  Posts one Discord embed describing a deploy — stage, region, ref, and the
+  commit subjects that went out — to the webhook in DISCORD_RELEASE_WEBHOOK_URL.
+
+# A composite action rather than another reusable workflow, because the two
+# places a deploy happens are not the same shape. `deploy-cdk-reusable.yml`
+# calls this as its last step; a consumer whose Release.yml deploys by hand
+# (SAM, ECS, a script) adds the same one step to its own job. A reusable
+# workflow could only serve the first.
+#
+# Never fails the job it runs in. A notification that can break a deploy is
+# worse than no notification.
+
+inputs:
+  webhook_url:
+    description: >-
+      Discord webhook. Pass `${{ secrets.DISCORD_RELEASE_WEBHOOK_URL }}`; empty
+      means the repository has not configured one and the step no-ops, so this
+      can be wired everywhere before every repository holds the secret.
+    required: true
+  stage:
+    description: 'Stage deployed to, as it appears in the title (dev, stg, prod).'
+    required: false
+    default: ''
+  region:
+    description: 'AWS region, shown beside the stage.'
+    required: false
+    default: ''
+  details:
+    description: 'Extra markdown appended to the embed — a stack name, a version, a smoke-test verdict.'
+    required: false
+    default: ''
+
+runs:
+  using: composite
+  steps:
+    - name: Notify Discord
+      shell: bash
+      env:
+        # The webhook stays in the environment and out of every command line:
+        # `curl` prints the URL it failed on, and Actions only masks values it
+        # knows are secrets — a URL passed as an input is not one of them.
+        WEBHOOK_URL: ${{ inputs.webhook_url }}
+        STAGE: ${{ inputs.stage }}
+        REGION: ${{ inputs.region }}
+        DETAILS: ${{ inputs.details }}
+        # `job.status` at this point is the job so far, which is why the calling
+        # step runs with `if: always()` — a failed deploy is the one you most
+        # want in the channel.
+        JOB_STATUS: ${{ job.status }}
+        REPO: ${{ github.repository }}
+        REF_NAME: ${{ github.ref_name }}
+        SHA: ${{ github.sha }}
+        ACTOR: ${{ github.actor }}
+        SERVER_URL: ${{ github.server_url }}
+        RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+      run: |
+        set -uo pipefail
+
+        if [ -z "${WEBHOOK_URL:-}" ]; then
+          echo "DISCORD_RELEASE_WEBHOOK_URL is not set — skipping the Discord notification."
+          exit 0
+        fi
+
+        # `set -u` aborts only the command that reads an unset variable, so one
+        # missing name here posted an embed with an empty body rather than
+        # failing loudly. Defaulting them keeps -u catching a typo in this
+        # script, which is what it is for.
+        : "${STAGE:=}" "${REGION:=}" "${DETAILS:=}" "${JOB_STATUS:=}" "${REPO:=}" \
+          "${REF_NAME:=}" "${SHA:=}" "${ACTOR:=}" "${RUN_URL:=}" "${SERVER_URL:=https://github.com}"
+
+        case "$JOB_STATUS" in
+          success)   ICON="✅"; COLOR=3066993;  VERB="desplegado" ;;
+          cancelled) ICON="⚪"; COLOR=9807270;  VERB="cancelado"  ;;
+          *)         ICON="❌"; COLOR=15158332; VERB="falló"      ;;
+        esac
+
+        WHERE="$STAGE"
+        [ -n "$REGION" ] && WHERE="$STAGE ($REGION)"
+        [ -z "$WHERE" ] && WHERE="$REF_NAME"
+
+        # The event payload is read from disk rather than interpolated through
+        # `toJSON(github.event)`: a commit message containing a quote or a `}}`
+        # breaks the expression, and one containing a backtick would otherwise
+        # reach a shell.
+        EV="${GITHUB_EVENT_PATH:-/dev/null}"
+        [ -f "$EV" ] || EV=/dev/null
+
+        # What actually went out, in the three shapes a deploy is triggered:
+        # a push to main carries `commits`, a tag push carries only the commit
+        # it points at, and a label-gated pull request carries its title.
+        CHANGES=$(jq -r '
+          [ (.commits // [])[] | .message | split("\n")[0] ]
+          | map(select(. != ""))
+          | .[0:12]
+          | map("• " + .)
+          | join("\n")
+        ' "$EV" 2>/dev/null || true)
+
+        if [ -z "$CHANGES" ]; then
+          CHANGES=$(jq -r '
+            [ (.head_commit.message // .pull_request.title // "") | split("\n")[0] ]
+            | map(select(. != ""))
+            | map("• " + .)
+            | join("\n")
+          ' "$EV" 2>/dev/null || true)
+        fi
+        [ -z "$CHANGES" ] && CHANGES="_(sin detalle de commits en el evento ${GITHUB_EVENT_NAME:-?})_"
+
+        # Discord rejects a description over 4096 characters outright rather
+        # than trimming it, which would turn a big merge into no message at all.
+        # The commit list is the only unbounded part, so it is what gets cut —
+        # cutting the assembled description instead dropped the links, which are
+        # the half of the message worth keeping when the list is too long.
+        if [ "${#CHANGES}" -gt 3300 ]; then
+          CHANGES="${CHANGES:0:3300}"$'\n'"…"
+        fi
+
+        # `compare` on a push is the range that just shipped — the closest thing
+        # to "what is in this deploy" GitHub hands over for free. A tag push has
+        # a useless one (its `before` is all zeroes), so there it falls back to
+        # the tag.
+        LINK=$(jq -r '.compare // .pull_request.html_url // ""' "$EV" 2>/dev/null || true)
+        case "${GITHUB_REF:-}" in
+          refs/tags/*) LINK="$SERVER_URL/$REPO/releases/tag/$REF_NAME" ;;
+        esac
+        [ -z "$LINK" ] && LINK="$SERVER_URL/$REPO/commit/$SHA"
+
+        DESC=$(printf '**Ref** `%s` · **Commit** [`%s`](%s/%s/commit/%s) · **Por** %s\n\n%s\n' \
+          "$REF_NAME" "${SHA:0:7}" "$SERVER_URL" "$REPO" "$SHA" "$ACTOR" "$CHANGES")
+        [ -n "$DETAILS" ] && DESC=$(printf '%s\n%s\n' "$DESC" "$DETAILS")
+        DESC=$(printf '%s\n[Cambios](%s) · [Run](%s)' "$DESC" "$LINK" "$RUN_URL")
+
+        jq -n \
+          --arg title "$ICON $REPO $VERB en $WHERE" \
+          --arg desc "$DESC" \
+          --arg url "$RUN_URL" \
+          --arg ts "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+          --argjson color "$COLOR" \
+          '{embeds: [{title: $title, description: $desc, url: $url, color: $color, timestamp: $ts}]}' \
+          > "$RUNNER_TEMP/discord-deploy.json"
+
+        # curl's own error text names the URL it failed on, so stderr is
+        # dropped and the HTTP code is the whole verdict.
+        CODE=$(curl -sS -o "$RUNNER_TEMP/discord-deploy.out" -w '%{http_code}' \
+          -X POST -H 'Content-Type: application/json' \
+          --data @"$RUNNER_TEMP/discord-deploy.json" \
+          "$WEBHOOK_URL" 2>/dev/null) || CODE="${CODE:-000}"
+
+        case "$CODE" in
+          2*) echo "Discord notified (HTTP $CODE)." ;;
+          *)  echo "::warning::Discord notification failed with HTTP $CODE: $(head -c 300 "$RUNNER_TEMP/discord-deploy.out" 2>/dev/null)" ;;
+        esac
