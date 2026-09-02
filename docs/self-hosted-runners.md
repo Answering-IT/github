@@ -223,6 +223,69 @@ This is the metric that identified the real bottleneck, and it had been availabl
 time — it simply was not on any dashboard. If a host feels slow and nothing else explains it,
 start here.
 
+## When CI stops moving
+
+The queue on this host has one failure mode worth knowing by name.
+
+GitHub gives a run up when the runner stops reporting — the job goes red, or goes back to
+*queued* to be picked up again. **The worker on the host never finds out.** It keeps
+building, holding that repository's runner, and since a runner runs one job at a time the
+next job queues behind work nobody is waiting for. Two of these at once took the host to
+load 53 on 2 vCPUs with both builds two hours old, and the pull request that was waiting
+had a job sitting in *queued* the whole time.
+
+Nothing recovers from it on its own. Restarting the runner unit kills the orphan, and
+GitHub hands the re-queued job to the runner within seconds of it coming back.
+
+### The button
+
+**Actions → [CI host rescue](../../actions/workflows/ci-host-rescue.yml) → Run workflow.**
+It runs on a GitHub-hosted runner, deliberately: the host being rescued is the one whose
+queue is stuck, so a job that ran there would queue behind the very thing it is clearing.
+
+| Action | Does |
+|---|---|
+| `status` | Read-only, and the default: load, memory, disk, and what every runner is doing. A worker older than an hour is marked `WEDGED` |
+| `restart` | Restarts the runners that are wedged or not active, and leaves the ones that are genuinely building. `force` restarts them all, killing whatever they are running |
+| `clean` | Journal down to 500 MB, `_diag` logs older than three days, dangling Docker images, and the workspaces of the idle runners. First run took the root volume from 100% to 64% |
+
+`target` narrows any of them to one repository. `status` first is the habit worth having:
+`restart` on a healthy host is how a real build gets killed.
+
+**`clean` keeps the workspaces below 80% disk.** Deleting `_work` costs every following
+build a fresh clone and a fresh `npm ci`, which is precisely the many-small-files I/O this
+host is worst at — so it only happens when the disk is the bigger problem. A runner that
+is building is skipped either way.
+
+The workflow sends [`runner/ci-host-rescue.sh`](../runner/ci-host-rescue.sh) from its own
+checkout rather than calling a copy installed on the host, so what runs is what is
+committed here. Worth insisting on: the host's `publish-metrics.sh` has already drifted
+from the copy in this repository, and a rescue script you cannot read in the pull request
+that changed it is one you end up debugging over SSM at the worst moment.
+
+Two secrets on this repository, because it is public and the machine is not named here:
+
+```shell
+gh secret set CI_HOST_INSTANCE_ID -R Answering-IT/github --body i-...
+gh secret set CI_HOST_ROLE_ARN    -R Answering-IT/github --body arn:aws:iam::<account>:role/<role>
+```
+
+The role needs `ssm:SendCommand` and `ssm:GetCommandInvocation` on the instance. The same
+shared OIDC role the deploys use already has them.
+
+### Doing it by hand
+
+The script takes its settings from the environment, so the same three actions work from a
+laptop with the AWS profile:
+
+```shell
+{ echo 'ACTION=status TARGET=all FORCE=false'; echo 'export ACTION TARGET FORCE'; \
+  cat runner/ci-host-rescue.sh; } > /tmp/payload.sh
+jq -n --rawfile s /tmp/payload.sh '{commands:[$s]}' > /tmp/params.json
+aws ssm send-command --instance-ids "$CI_HOST_INSTANCE_ID" \
+  --document-name AWS-RunShellScript --parameters file:///tmp/params.json
+```
+
 ## Sizing, honestly
 
 Five repositories on a two-vCPU host works and does not fall over, but three concurrent
