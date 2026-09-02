@@ -1,0 +1,116 @@
+name: CI host rescue
+
+# The button for when CI stops moving.
+#
+# Without an organisation every repository needs its own runner, and nothing coordinates
+# them. When a job wedges -- GitHub gives the run up, the worker on the host never finds
+# out -- that repository's runner stays busy forever and its next job queues behind a job
+# nobody is waiting for. Unsticking it used to mean an AWS profile, SSM and knowing the
+# instance id, which is one person on a good day.
+#
+# Everything it runs is runner/ci-host-rescue.sh, sent to the host from this checkout. The
+# script is not installed there: what runs is what is committed here, reviewable in the
+# pull request that changed it.
+
+on:
+  workflow_dispatch:
+    inputs:
+      action:
+        description: What to do on the CI host
+        type: choice
+        default: status
+        options:
+          - status
+          - restart
+          - clean
+      target:
+        description: Repository whose runner to act on, or "all"
+        default: all
+      force:
+        description: 'restart: restart healthy runners too, killing whatever they are building'
+        type: boolean
+        default: false
+
+# Two people pressing this at once is the likeliest way to make things worse. Queue,
+# never cancel: a half-finished restart leaves runners down.
+concurrency:
+  group: ci-host-rescue
+  cancel-in-progress: false
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  rescue:
+    name: ${{ inputs.action }} ${{ inputs.target }}
+    # GitHub-hosted on purpose. The host being rescued is the one whose queue is stuck, so
+    # a job that ran there would queue behind the very thing it is meant to clear.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # This repository is public, so the machine and the role are secrets rather than
+      # inputs with defaults -- same reason deploy-cdk-reusable.yml takes its role ARN.
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.CI_HOST_ROLE_ARN }}
+          aws-region: us-east-1
+
+      - name: Run on the CI host
+        env:
+          INSTANCE_ID: ${{ secrets.CI_HOST_INSTANCE_ID }}
+          ACTION: ${{ inputs.action }}
+          TARGET: ${{ inputs.target }}
+          FORCE: ${{ inputs.force }}
+        run: |
+          set -euo pipefail
+
+          if [ -z "$INSTANCE_ID" ]; then
+            echo "::error::CI_HOST_INSTANCE_ID is not set on this repository"
+            exit 1
+          fi
+
+          # A repository name, not a shell fragment. Whoever can dispatch this can already
+          # push to the repository, so this is a typo guard rather than a security border --
+          # but a typo that becomes a command on the CI host is a bad way to find out.
+          case "$TARGET" in
+            ''|*[!A-Za-z0-9._-]*) echo "::error::invalid target: $TARGET"; exit 1 ;;
+          esac
+
+          # AWS-RunShellScript has no argv, so the settings go in front of the script.
+          {
+            printf 'ACTION=%s TARGET=%s FORCE=%s\n' "$ACTION" "$TARGET" "$FORCE"
+            printf 'export ACTION TARGET FORCE\n'
+            cat runner/ci-host-rescue.sh
+          } > payload.sh
+          jq -n --rawfile s payload.sh '{commands: [$s]}' > params.json
+
+          id=$(aws ssm send-command \
+                 --instance-ids "$INSTANCE_ID" \
+                 --document-name AWS-RunShellScript \
+                 --comment "ci-host-rescue $ACTION $TARGET" \
+                 --parameters file://params.json \
+                 --query Command.CommandId --output text)
+
+          # Not `aws ssm wait command-executed`: its 100-second ceiling is shorter than a
+          # clean, and the invocation does not exist for the first second or so.
+          state=Pending
+          for _ in $(seq 90); do
+            state=$(aws ssm get-command-invocation --command-id "$id" \
+                      --instance-id "$INSTANCE_ID" --query Status --output text 2>/dev/null || echo Pending)
+            case "$state" in Pending|InProgress|Delayed) sleep 10 ;; *) break ;; esac
+          done
+
+          aws ssm get-command-invocation --command-id "$id" --instance-id "$INSTANCE_ID" \
+            --query '[StandardOutputContent,StandardErrorContent]' --output text | tee out.txt
+
+          {
+            echo "### CI host — \`$ACTION\` on \`$TARGET\` → $state"
+            echo '```'
+            cat out.txt
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          [ "$state" = Success ]

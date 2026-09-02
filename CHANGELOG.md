@@ -8,6 +8,35 @@ versioning is [semantic](https://semver.org/spec/v2.0.0.html).
 
 ---
 
+## [Unreleased]
+
+No tag: nothing here is called by another repository, so there is no pin to move.
+
+### Added
+
+- `ci-host-rescue.yml` and `runner/ci-host-rescue.sh`: `status`, `restart` and `clean`
+  against the shared CI host, dispatched from the Actions tab instead of needing the AWS
+  profile and the instance id on somebody's laptop.
+
+  What it is for: GitHub gives a run up when the runner stops reporting, and the worker on
+  the host never finds out. It keeps building, its runner stays busy, and the next job for
+  that repository queues behind work nobody is waiting for. Found with two of them at once
+  — load 53 on 2 vCPUs, both builds two hours past the point GitHub had abandoned them,
+  a pull request stuck in *queued*, and the root volume at 100%.
+
+  `restart` leaves runners that are genuinely building and only takes the wedged and the
+  inactive, so pressing it during a normal build is not destructive; `force` is the escape
+  hatch that is. `clean` keeps the workspaces until the disk passes 80%, because dropping
+  them costs every later build a fresh clone and `npm ci`, the exact I/O this host is
+  worst at.
+
+  Runs on `ubuntu-latest`, never on the host: a rescue that queues behind the queue it is
+  clearing is not a rescue. The script is sent from the checkout rather than installed, so
+  what runs is what is committed — the host's `publish-metrics.sh` has already drifted from
+  the copy here, which is the argument.
+
+---
+
 ## [1.4.0] - 2026-09-02
 
 > **The `v1.4.0` tag was moved**, minutes after it was first pushed. The original
