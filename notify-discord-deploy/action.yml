@@ -11,13 +11,22 @@ description: >-
 #
 # Never fails the job it runs in. A notification that can break a deploy is
 # worse than no notification.
+#
+# NOTHING in this file may contain a `secrets.*` expression — not even inside a
+# description, as an example of what to pass. GitHub evaluates expressions
+# everywhere in an action manifest, and a composite action has no `secrets`
+# context, so one in a description does not read as documentation: it fails the
+# manifest to load and every job using the action dies in "Set up job". Which is
+# what v1.4.0 did on its first four real deploys. The webhook arrives as an
+# input; reading the secret is the caller's job.
 
 inputs:
   webhook_url:
     description: >-
-      Discord webhook. Pass `${{ secrets.DISCORD_RELEASE_WEBHOOK_URL }}`; empty
-      means the repository has not configured one and the step no-ops, so this
-      can be wired everywhere before every repository holds the secret.
+      Discord webhook, from the caller's DISCORD_RELEASE_WEBHOOK_URL secret.
+      Empty means the repository has not configured one and the step no-ops, so
+      this can be wired everywhere before every repository holds the secret.
+      (Written without the expression braces on purpose — see the note above.)
     required: true
   stage:
     description: 'Stage deployed to, as it appears in the title (dev, stg, prod).'

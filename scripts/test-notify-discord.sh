@@ -28,6 +28,21 @@ missing = [v for v in ("WEBHOOK_URL", "JOB_STATUS", "REPO", "REF_NAME", "SHA", "
 assert not missing, f"not declared in the action's env: {missing}"
 PY
 
+# 0. Every expression in the manifest uses a context a composite action actually
+#    has. `secrets` is not one, and GitHub evaluates expressions inside
+#    descriptions too, so one used as an example of what to pass fails the whole
+#    manifest to load and kills every job in "Set up job" — v1.4.0 shipped
+#    exactly that. Invisible to a YAML parse (the file is valid YAML) and only
+#    visible on a runner, which is why this is its own check.
+python3 - "$ROOT" <<'CONTEXTS'
+import sys, pathlib, re
+manifest = (pathlib.Path(sys.argv[1]) / "notify-discord-deploy/action.yml").read_text()
+ALLOWED = {"inputs", "github", "job", "runner", "steps", "env"}
+bad = sorted({m for m in re.findall(r"\$\{\{\s*([A-Za-z_]+)", manifest) if m not in ALLOWED})
+assert not bad, ("contexts a composite action manifest cannot use, and GitHub fails the entire "
+                 f"manifest over them \u2014 descriptions included: {bad}")
+CONTEXTS
+
 SCRIPT="$WORK/notify.sh"
 export RUNNER_TEMP="$WORK" SERVER_URL="https://github.com" REPO="Answering-IT/example" \
   SHA="759c59b1234567890abcdef1234567890abcdef1" ACTOR="someone" DETAILS="" \
