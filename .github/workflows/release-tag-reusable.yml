@@ -1,0 +1,118 @@
+name: Release target (tag - Reusable)
+
+# The tag shape decides the stage, and nothing else does:
+#
+#   v1.4.0-rc2  -> stg
+#   v1.4.0      -> prod
+#
+# Anything else fails rather than being guessed at, so a typo like `v1.4` or
+# `release-1.4.0` cannot quietly become a production deployment.
+#
+# This was hand-written, character for character, in three services' Release.yml
+# already. It resolves and outputs; it does not deploy. The region a stage lives
+# in is the consumer's own configuration — CDK reads it from the repository's
+# config file — and a second copy of that mapping here is precisely the thing
+# that would drift.
+#
+# It serves rollback too. Pass `tag` and the same parse and the same ancestry
+# guard run against it, so going back to v1.3.0 is checked exactly the way
+# shipping v1.4.0 was.
+
+on:
+  workflow_call:
+    inputs:
+      tag:
+        description: >-
+          Tag to resolve. Empty (the default) reads the tag that triggered the
+          caller, which is what `on: push: tags` wants. A rollback is dispatched
+          from a branch, so it passes the tag it is going back to.
+        type: string
+        required: false
+        default: ''
+      base_branch:
+        description: >-
+          Branch the tag must be reachable from. A tag can be created on any
+          commit, including one that never went through review; requiring
+          ancestry is what makes a release ship something that was merged.
+        type: string
+        required: false
+        default: main
+      runner:
+        description: 'Runner label. Defaults to ubuntu-latest, so a consumer opts in to self-hosted.'
+        type: string
+        required: false
+        default: ubuntu-latest
+    outputs:
+      stage:
+        description: '`stg` for a -rcN tag, `prod` for a plain vX.Y.Z.'
+        value: ${{ jobs.resolve.outputs.stage }}
+      version:
+        description: 'The tag itself, for a deployment summary or a notification.'
+        value: ${{ jobs.resolve.outputs.version }}
+      sha:
+        description: 'The commit the tag points at.'
+        value: ${{ jobs.resolve.outputs.sha }}
+
+permissions:
+  contents: read
+
+jobs:
+  resolve:
+    name: Determine stage from tag
+    runs-on: ${{ inputs.runner }}
+    outputs:
+      stage: ${{ steps.parse.outputs.stage }}
+      version: ${{ steps.parse.outputs.version }}
+      sha: ${{ steps.parse.outputs.sha }}
+
+    steps:
+      # Checking out the tag rather than the caller's ref is what makes the
+      # dispatched case work at all: a rollback runs from `main`, and the commit
+      # that has to be checked is the tag's. A tag that does not exist fails
+      # here, before anything reaches AWS.
+      #
+      # Full history so the ancestry check below can see the base branch.
+      - name: Checkout the tag
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.tag }}
+          fetch-depth: 0
+
+      - name: Parse the tag
+        id: parse
+        env:
+          INPUT_TAG: ${{ inputs.tag }}
+        run: |
+          set -euo pipefail
+          # Dispatched: the input. Pushed: the ref that triggered the caller. A
+          # dispatch that forgot the input leaves `refs/heads/main` here, which
+          # matches neither shape and is refused below rather than deployed.
+          TAG="${INPUT_TAG:-${GITHUB_REF#refs/tags/}}"
+
+          if [[ "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+-rc[0-9]+$ ]]; then
+            stage=stg
+          elif [[ "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            stage=prod
+          else
+            echo "::error::'$TAG' matches neither vX.Y.Z-rcN (stg) nor vX.Y.Z (prod)." >&2
+            exit 1
+          fi
+
+          {
+            echo "stage=$stage"
+            echo "version=$TAG"
+            echo "sha=$(git rev-parse HEAD)"
+          } >> "$GITHUB_OUTPUT"
+
+          echo "$TAG -> $stage"
+
+      - name: Require the tag to be on ${{ inputs.base_branch }}
+        env:
+          BASE: ${{ inputs.base_branch }}
+        run: |
+          set -euo pipefail
+          git fetch --no-tags --quiet origin "$BASE"
+          if ! git merge-base --is-ancestor HEAD FETCH_HEAD; then
+            echo "::error::$(git rev-parse HEAD) is not an ancestor of origin/$BASE. Tag a merged commit." >&2
+            exit 1
+          fi

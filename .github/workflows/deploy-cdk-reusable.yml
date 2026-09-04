@@ -22,6 +22,15 @@ on:
           beside a description of what it deploys is reconnaissance.
         type: string
         required: true
+      ref:
+        description: >-
+          Git ref to deploy - a tag, a branch or a SHA. Empty (the default)
+          deploys the caller's own commit, which is what a merge or a tag push
+          wants. A rollback passes the tag it is going back to, and that is the
+          whole of a rollback: this workflow, aimed at an older commit.
+        type: string
+        required: false
+        default: ''
       stage:
         description: 'Passed as --context stage=<value>, and used in the job name.'
         type: string
@@ -85,8 +94,12 @@ jobs:
     timeout-minutes: 30
 
     steps:
+      # `ref: ''` is what actions/checkout already does by default, so the
+      # empty default is genuinely today's behaviour and no consumer moves.
       - name: Checkout code
         uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.ref }}
 
       - name: Set up QEMU
         if: inputs.docker_assets
@@ -138,15 +151,20 @@ jobs:
             echo "- **Stage**: ${{ inputs.stage }}"
             echo "- **Region**: ${{ inputs.region }}"
             echo "- **Account**: $(printf '%s' "$ROLE_ARN" | cut -d: -f5)"
-            echo "- **Commit**: ${{ github.sha }}"
+            echo "- **Ref**: ${{ inputs.ref || github.ref_name }}"
+            # Read off the checkout, not from `github.sha`: a rollback runs from
+            # a branch, so `github.sha` is that branch's head and not the commit
+            # that just shipped.
+            echo "- **Commit**: $(git rev-parse HEAD)"
           } >> "$GITHUB_STEP_SUMMARY"
 
       # Last, and `always()`: a failed deploy is the one worth having in the
       # channel. The action itself never fails the job.
       - name: Notify Discord
         if: always()
-        uses: Answering-IT/github/notify-discord-deploy@v1.4.0
+        uses: Answering-IT/github/notify-discord-deploy@v1.5.0
         with:
           webhook_url: ${{ secrets.DISCORD_RELEASE_WEBHOOK_URL }}
           stage: ${{ inputs.stage }}
           region: ${{ inputs.region }}
+          details: ${{ inputs.ref && format('**Ref** `{0}`', inputs.ref) || '' }}
