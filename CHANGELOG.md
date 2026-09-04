@@ -14,6 +14,25 @@ Nothing yet.
 
 ---
 
+## [1.6.0] - 2026-09-04
+
+### Added
+
+- `release-tag-reusable.yml` takes `allow_stg`, default true. Set false, an `-rcN` tag is
+  refused with a message saying the service has no stg to put it in.
+
+  Found while migrating `form-projection-lambda`, which had written that rejection by
+  hand: it has dev and prod and nothing between them, so without this the reusable would
+  have sent a release candidate to a stage that does not exist. The two failures worth
+  preventing are a tag that deploys nothing and a tag that falls through to prod.
+
+  `scripts/test-release-tag.sh` now covers seventeen shapes, including `allow_stg` unset
+  — `set -u` aborts only the command that reads an unset name, so a missing default would
+  be a silent empty string rather than a failure, which is how `notify-discord-deploy`
+  once shipped an empty embed.
+
+---
+
 ## [1.5.0] - 2026-09-04
 
 ### Added

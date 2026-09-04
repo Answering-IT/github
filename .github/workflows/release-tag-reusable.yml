@@ -2,7 +2,7 @@ name: Release target (tag - Reusable)
 
 # The tag shape decides the stage, and nothing else does:
 #
-#   v1.4.0-rc2  -> stg
+#   v1.4.0-rc2  -> stg   (or refused, where `allow_stg` is false)
 #   v1.4.0      -> prod
 #
 # Anything else fails rather than being guessed at, so a typo like `v1.4` or
@@ -29,6 +29,17 @@ on:
         type: string
         required: false
         default: ''
+      allow_stg:
+        description: >-
+          Whether this service has a stg to promote to. Left true, an `-rcN` tag
+          goes there. Set false and one is refused, saying so — which is what a
+          service with only dev and prod needs: `form-projection-lambda` wrote
+          exactly that rejection by hand, because a release candidate there has
+          nowhere to go and the alternative is a tag that silently deploys
+          nothing, or worse, deploys to prod.
+        type: boolean
+        required: false
+        default: true
       base_branch:
         description: >-
           Branch the tag must be reachable from. A tag can be created on any
@@ -82,6 +93,7 @@ jobs:
         id: parse
         env:
           INPUT_TAG: ${{ inputs.tag }}
+          ALLOW_STG: ${{ inputs.allow_stg }}
         run: |
           set -euo pipefail
           # Dispatched: the input. Pushed: the ref that triggered the caller. A
@@ -90,6 +102,10 @@ jobs:
           TAG="${INPUT_TAG:-${GITHUB_REF#refs/tags/}}"
 
           if [[ "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+-rc[0-9]+$ ]]; then
+            if [[ "${ALLOW_STG:-true}" != "true" ]]; then
+              echo "::error::'$TAG' is a release candidate and this service has no stg to put it in. dev ships on merge to main." >&2
+              exit 1
+            fi
             stage=stg
           elif [[ "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
             stage=prod

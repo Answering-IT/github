@@ -80,6 +80,10 @@ v1.4.0      ->  prod
 anything else -> the run fails
 ```
 
+A service with only dev and prod passes `allow_stg: false`, and an `-rcN` tag is then
+refused with a message saying why. Without it the two failure modes are a release
+candidate that deploys nowhere and, worse, one that falls through to production.
+
 It resolves and outputs; it does not deploy. The region a stage lives in is the
 consumer's own configuration — the CDK app reads it from a config file in the
 repository — and a second copy of that mapping here is exactly the thing that would
