@@ -10,9 +10,35 @@ versioning is [semantic](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
-No tag: nothing here is called by another repository, so there is no pin to move.
+Nothing yet.
+
+---
+
+## [1.5.0] - 2026-09-04
 
 ### Added
+
+- `release-tag-reusable.yml`: the half of a release that was hand-written, character for
+  character, in `forms-service`, `metadata-service` and `form-projection-lambda` — parse
+  the tag, `-rcN` to stg and a plain `vX.Y.Z` to prod, and refuse a tag that is not
+  reachable from `main`. It outputs `stage`, `version` and `sha`; it does not deploy,
+  because the region a stage lives in is the consumer's own configuration and a copy of
+  that mapping here is what would drift.
+
+  `scripts/test-release-tag.sh` runs the workflow's own parse over thirteen tag shapes,
+  extracted from the YAML so the check cannot drift from what ships. Seven of them are
+  rejections: `v1.4`, `v1.4.0-rc`, `v1.4.0-rc1-hotfix` and `v1.4.0x` are each a
+  production deploy if an anchor is loosened at one end.
+
+- `deploy-cdk-reusable.yml` takes a `ref` — a tag, a branch or a SHA to deploy instead of
+  the caller's own commit. **This is the whole of a rollback**: the same workflow aimed at
+  an older tag, so going back runs the identical steps that shipped it rather than a
+  second code path that only ever executes during an incident. Empty by default, which is
+  what `actions/checkout` already did, so no consumer moves.
+
+  The deploy summary and the Discord embed now name the ref, and the summary's commit is
+  read off the checkout rather than `github.sha` — a rollback is dispatched from a branch,
+  so `github.sha` is that branch's head and not the commit that just shipped.
 
 - `ci-host-rescue.yml` and `runner/ci-host-rescue.sh`: `status`, `restart` and `clean`
   against the shared CI host, dispatched from the Actions tab instead of needing the AWS

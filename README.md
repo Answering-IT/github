@@ -21,6 +21,7 @@ than carrying it.
 | `build-python-reusable.yml` | `lint`, `unit-tests` | Python services and Lambdas |
 | `build-go-reusable.yml` | `lint`, `build`, `test` | Go services |
 | `deploy-cdk-reusable.yml` | `deploy` | AWS CDK apps — one stage per call, OIDC, no long-lived keys |
+| `release-tag-reusable.yml` | `resolve` | Tag-driven promotion — the tag shape decides the stage, for both Release and Rollback |
 
 Every one accepts a `runner` input, defaulting to `ubuntu-latest`.
 
@@ -67,6 +68,92 @@ token's permissions but never raise them, so declaring it here would not help.
 **Post-deploy checks belong to the consumer.** A reachability probe, a smoke test, a
 cache purge — those know something about the service, so they go in a `needs: deploy`
 job in the calling repository, not behind another input here.
+
+### Releasing, and rolling back
+
+`release-tag-reusable.yml` is the half of a release that is the same everywhere: read
+the tag, decide the stage from its shape, and refuse a tag that is not on `main`.
+
+```
+v1.4.0-rc2  ->  stg
+v1.4.0      ->  prod
+anything else -> the run fails
+```
+
+It resolves and outputs; it does not deploy. The region a stage lives in is the
+consumer's own configuration — the CDK app reads it from a config file in the
+repository — and a second copy of that mapping here is exactly the thing that would
+drift, so the caller passes the region it already knows.
+
+```yaml
+# .github/workflows/Release.yml
+on:
+  push:
+    tags: ["v*"]
+
+concurrency:
+  # Same group Deploy.yml uses, so a release and a merge to the same stage queue
+  # behind each other instead of colliding in CloudFormation.
+  group: deploy-${{ contains(github.ref_name, '-rc') && 'stg' || 'prod' }}
+  cancel-in-progress: false
+
+jobs:
+  target:
+    uses: Answering-IT/github/.github/workflows/release-tag-reusable.yml@v1.5.0
+
+  deploy:
+    needs: target
+    uses: Answering-IT/github/.github/workflows/deploy-cdk-reusable.yml@v1.5.0
+    with:
+      role_to_assume: arn:aws:iam::<account>:role/<role>
+      stage: ${{ needs.target.outputs.stage }}
+      region: ${{ needs.target.outputs.stage == 'prod' && 'us-east-2' || 'us-east-1' }}
+      environment: ${{ needs.target.outputs.stage }}
+    secrets: inherit
+```
+
+**A rollback is that same pair, dispatched, aimed at an older tag.** `deploy-cdk-reusable.yml`
+takes a `ref`, so going back to v1.3.0 runs the identical steps that shipped it — the
+same synth, the same assets, the same CloudFormation update — rather than a second code
+path that only ever executes during an incident, which is when you least want to find out
+it rotted:
+
+```yaml
+# .github/workflows/Rollback.yml
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Tag to go back to'
+        required: true
+        type: string
+
+jobs:
+  target:
+    uses: Answering-IT/github/.github/workflows/release-tag-reusable.yml@v1.5.0
+    with:
+      tag: ${{ inputs.tag }}      # the same parse and the same ancestry guard
+
+  deploy:
+    needs: target
+    uses: Answering-IT/github/.github/workflows/deploy-cdk-reusable.yml@v1.5.0
+    with:
+      ref: ${{ inputs.tag }}      # <- the whole of the rollback
+      stage: ${{ needs.target.outputs.stage }}
+      ...
+```
+
+Two things deliberately absent from the rollback:
+
+**No typed confirmation.** The gate is the GitHub environment the deploy already runs
+in — add reviewers to `prod` and it applies to Deploy, Release and Rollback at once.
+Friction invented specifically for the rollback lever is friction in the middle of an
+incident, and rolling back to a known-good tag is the *safe* action, not the dangerous
+one.
+
+**No database story.** This redeploys code. A release that migrated the schema is not
+undone by redeploying the previous one, and no workflow can decide that for you — which
+is the argument for migrations that the previous version can still run against.
 
 ### Deploying a pull request branch
 
